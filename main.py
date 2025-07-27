@@ -1,43 +1,52 @@
-
-from fastapi import FastAPI, Query
-from pydantic import BaseModel
-from utils import grabar_audio, listar_grabaciones, eliminar_grabacion, renombrar_grabacion, reproducir_grabacion
+from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from utils import procesar_audio
+import os
 
 app = FastAPI()
 
-class RenombrarRequest(BaseModel):
-    actual: str
-    nuevo: str
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-class ReproducirRequest(BaseModel):
-    nombre: str
-    velocidad: float = 1.0
-    amplitud: float = 1.0
+MODULATED_DIR = "modulated_audio"
+os.makedirs(MODULATED_DIR, exist_ok=True)
 
-@app.get("/")
-def root():
-    return {"mensaje": "API de grabadora en FastAPI funcionando 🎙️"}
+@app.post("/modulate")
+async def modulate_audio(
+    file: UploadFile = File(...),
+    velocidad: float = Form(...),
+    volumen: float = Form(...)
+):
+    filename = file.filename
+    output_path = os.path.join(MODULATED_DIR, f"mod_{filename}")
 
-@app.get("/grabaciones")
-def get_grabaciones():
-    return listar_grabaciones()
+    try:
+        contents = await file.read()
+        with open(filename, "wb") as f:
+            f.write(contents)
 
-@app.post("/grabar")
-def post_grabar(segundos: int = Query(..., gt=0, lt=120)):
-    archivo = grabar_audio(segundos)
-    return {"grabacion_guardada": archivo}
+        procesar_audio(filename, output_path, velocidad, volumen)
+        os.remove(filename)
 
-@app.delete("/eliminar")
-def delete_grabacion(nombre: str):
-    eliminar_grabacion(nombre)
-    return {"estado": "eliminado", "archivo": nombre}
+        return FileResponse(output_path, media_type="audio/wav", filename=f"mod_{filename}")
 
-@app.post("/renombrar")
-def post_renombrar(data: RenombrarRequest):
-    renombrar_grabacion(data.actual, data.nuevo)
-    return {"estado": "renombrado", "de": data.actual, "a": data.nuevo}
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
-@app.post("/reproducir")
-def post_reproducir(data: ReproducirRequest):
-    reproducir_grabacion(data.nombre, data.velocidad, data.amplitud)
-    return {"estado": "reproduciendo", "archivo": data.nombre}
+@app.get("/list")
+def listar_audios():
+    files = os.listdir(MODULATED_DIR)
+    return {"archivos": files}
+
+@app.get("/download/{filename}")
+def descargar(filename: str):
+    path = os.path.join(MODULATED_DIR, filename)
+    if os.path.exists(path):
+        return FileResponse(path, media_type="audio/wav", filename=filename)
+    return JSONResponse(content={"error": "Archivo no encontrado"}, status_code=404)

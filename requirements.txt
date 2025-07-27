@@ -1,6 +1,5 @@
 fastapi
 uvicorn
-sounddevice
-soundfile
-librosa
-numpy
+pydub
+aiofiles
+python-multipart
